@@ -11,7 +11,7 @@ Solution to the hiring challenge of InMediam (2025, "Desafio Fullstack"). This r
 - `front/`: the React 18 + Vite + TypeScript + Tailwind scaffold. **It is unchanged.** The only addition is an empty `front/.env` (`VITE_API_URL=`).
 - `db/docker-compose.yml`: a PostgreSQL container.
 - The Laravel 9 skeleton in `api/`, including the `plans` and `users` migrations, `PlanSeeder` (6 plans), `UserSeeder` (1 user), the `Plan` and `User` models, `GET /api/plans` and `GET /api/user`.
-- The challenge statement, kept in Portuguese in [`CHALLENGE.md`](CHALLENGE.md).
+- The challenge statement, kept in Portuguese in [`docs/challenge.md`](docs/challenge.md).
 
 ### What the author built (all in `api/`)
 
