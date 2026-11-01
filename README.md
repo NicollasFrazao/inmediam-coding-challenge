@@ -1,108 +1,110 @@
-<div align="center">
-  <img alt="Desafio Full-stackt" title="Desafio Full-stack" src="https://garantia.inmediam.com.br//assets/logoInmediamCores-bc0eeaaa.svg" width="20%" />
-</div>
-<h1 align="center">
-    Desafio Full-stack
-</h1>
+# InMediam Fullstack Challenge - Plan subscription API
 
-<p align="center">
-  <a href="#descrição-do-desafio">Descrição do Desafio</a>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
-  <a href="#tarefas">Tarefas</a>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
-  <a href="#-configuração-do-ambiente">Configuração do ambiente</a>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
-  <a href="#extras">Extras</a>
-</p>
+A Laravel 9 API for subscribing to a plan with a simulated payment and switching plans, where the unused days of the current plan become credit.
 
-### Por favor, faça fork desse repositório para iniciar o exercício!
-### Tempo máximo esperado para resolução: 7 dias
+## Context
 
-## Descrição do Desafio
+Solution to the hiring challenge of InMediam (2025, "Desafio Fullstack"). This repository started as a fork of [`InMediam/desafio-fullstack`](https://github.com/InMediam/desafio-fullstack). That template provides a Laravel API with plans and a single user, a React + Vite front-end scaffold, and a PostgreSQL `docker-compose.yml`. The author's work starts at commit `8ae6dc8` (2025-07-15). Everything before it is the template.
 
-Esse sistema gere as assinaturas de um serviço.
+### What came from the template
 
-O usuário, logado no sistema, pode contratar um plano, que dá direito a um número de cotas de um produto e a uma quantidade de armazenamento em HD.
+- `front/`: the React 18 + Vite + TypeScript + Tailwind scaffold. **It is unchanged.** The only addition is an empty `front/.env` (`VITE_API_URL=`).
+- `db/docker-compose.yml`: a PostgreSQL container.
+- The Laravel 9 skeleton in `api/`, including the `plans` and `users` migrations, `PlanSeeder` (6 plans), `UserSeeder` (1 user), the `Plan` and `User` models, `GET /api/plans` and `GET /api/user`.
+- The challenge statement, kept in Portuguese in [`CHALLENGE.md`](CHALLENGE.md).
 
-Para simplificar, nesse exercício não foi desenvolvida a parte de login e autenticação, assim, pode considerar que o usuário está sempre logado.
+### What the author built (all in `api/`)
 
-O usuário inicialmente não tem nenhum plano contratado. Ele pode contratar um dos planos e "pagar" na hora com um "PIX". O sistema deve simular esse pagamento de PIX, gerando uma página para pagamento. Não precisa realmente fazer qualquer operação real de PIX, basta que a contratação se concretize no banco de dados.
+- **Migrations** `contracts` (`user_id`, `plan_id`, `is_active`, `value`, `discount`, `started_at`, `ended_at`) and `payments` (`user_id`, `contract_id`, a unique `transaction_id` UUID, `status` = `pending|completed|failed`, `value`).
+- In the template's `plans` migration, the `active` column was renamed to `is_active`.
+- **Models** `Contract` and `Payment` with relationships. `Plan` and `User` gain relationships, `$fillable` and casts, and `User` gets a `current_contract` accessor for the active contract.
+- **`PaymentObserver`** reacts when a payment's `status` changes:
+  - `completed`: the contract becomes active and the user's other contracts are deactivated. `started_at` is set if empty, and `ended_at` is set to one month ahead or extended by one month.
+  - Any other status deactivates the contract.
+- **Plan hiring with credit** (`PlanController@hire`):
+  - A new inactive contract is created at the plan's price.
+  - If the user has an active contract, its unused days become a credit of `contract value * remaining days / days in the contract's first month`.
+  - Payments are then created in a loop. Each one is `max(price - remaining credit, 0)`, and the credit drops by the plan price after each payment.
+  - So a credit larger than the new price produces several payments. Zero-value payments are completed straight away, which activates the contract through the observer.
+- **Endpoints**, listed in the next section.
+- **Laravel Sail setup**: `api/docker-compose.yml` (PHP 8.2 runtime, PostgreSQL 15, Redis) and `api/Makefile`.
 
-O pagamento de cada plano é mensal. A data de pagamento é sempre o mesmo dia do mês em que ele fez a contratação.
+## API
 
-Uma vez contratado, o usuário pode trocar de plano. Nesse ponto, ele já realizou um pagamento para iniciar a assinatura; quando ele troca de plano, aquele pagamento que ele fez será convertido em créditos de acordo com a quantidade de dias que ele já usou do plano anterior, e o crédito será aproveitado no próximo plano.
+There is no authentication, as the template states. Every endpoint works on the user with id `1`.
 
-Lembrando que ele pode trocar para um plano mais caro, ou um plano mais barato.
+| Method | Path | Origin | Description |
+| --- | --- | --- | --- |
+| GET | `/api/plans` | template | All plans |
+| GET | `/api/user` | template | The "logged-in" user |
+| GET | `/api/user/contracts` | author | The user's contracts, with plan and payments |
+| GET | `/api/user/contracts/current` | author | The active contract, with plan and payments, or `null` |
+| POST | `/api/user/plans/{plan}/hire` | author | Creates the contract and pending payment(s); returns the last payment |
+| POST | `/api/payments/{transaction_id}/process` | author | Body `status` = `pending\|completed\|failed`; simulates the payment confirmation |
 
-As contratações de plano que o usuário vai realizando deverão ser armazenadas numa tabela `contracts` no banco de dados. Essa tabela deve estar relacionada à tabela `users`. Cada usuário pode ter vários contratos, mas apenas um contrato de cada usuário pode ser considerado "ativo". Quando ele troca de plano, o contrato anterior deve ser desativado (nunca apagado) e o novo contrato será marcado como ativo. Deve haver uma forma fácil da api retornar o contrato ativo.
+## Tech stack
 
-Cada pagamento que o usuário faz será armazenado numa tabela `payments`. Cada pagamento pertence a um contrato. Quando o usuário troca de plano, e o novo contrato é criado, será criado um ou mais pagamentos pendentes, um pagamento para cada mês, dependendo do crédito que o usuário tinha e do valor do novo plano que ele escolheu.
+- **API**: PHP `^8.0.2`, Laravel 9.52, Sanctum 3.3 (installed but unused), PHPUnit 9.6, PostgreSQL. Versions are from `api/composer.lock`.
+- **Front-end** (template only): React 18, react-router-dom 6, Vite 4, TypeScript 5, Tailwind CSS 3.
 
-### Exemplo de troca de plano:
-> - Plano atual do usuário: R$ 100,00 por mês
-> - Data em que ele contratou: 01/09/2023
-> - No dia 15/09/2023, ele trocou para um plano de R$ 200,00 por mês
-> - Assim, o pagamento será gerado no valor de R$ 150,00 (ou seja, 200-50, pois ele teve um crédito de R$ 50,00 que ele não usou do plano anterior ao trocar no dia 15)
+## Running locally
 
-#### Isso é apenas um exemplo, deve funcionar para qualquer dia do mês, e para troca de qualquer combinação de planos, tanto para um plano menor, quanto para um plano maior!
-#### A lógica do caso de troca de plano maior para menor faz parte do exercício!
+**Option A, the template's own steps:**
 
-## Tarefas
+```bash
+(cd db && docker compose up -d)          # PostgreSQL on 5432, database "desafio"
+cd api
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate
+php artisan db:seed
+php artisan serve                        # http://127.0.0.1:8000/api
+```
 
-- Exibição dos dados do usuário (não é necessário autenticação);
-- Exibição de todos os planos cadastrados no banco de dados, criar tela seguindo padrão da imagem a seguir:  <a target="_blank" href="https://ibb.co/2cPmjtw">Tela de planos</a>;
-- Seleção e assinatura do plano com pagamento fictício (tipo Pix);
-- Exibir o plano atualmente contratado;
-- Alteração de plano para o caso do usuário já ter realizado uma assinatura.
+**Option B, Laravel Sail** (the author's setup, through `api/Makefile`):
 
-## 🔧 Configuração do ambiente
+```bash
+cd api
+cp .env.example .env                     # set DB_HOST=pgsql for the Sail network
+make install                             # composer install
+make start                               # sail up -d (PostgreSQL forwarded to 54322)
+./vendor/bin/sail artisan key:generate
+make seed                                # migrate --seed
+```
 
-### Frontend
+**Front-end** (it shows only the template's placeholder page):
 
-Projeto React criado com Vite, utilizando Typescript.
+```bash
+cd front && npm install && npm run dev
+```
 
-#### Iniciando:
+## Tests
 
-1. `npm install`
-2. Copie o arquivo `.env.example` para `.env` e modifique se necessário
-3. `npm run dev`
+```bash
+cd api && make test                      # or: php artisan test
+```
 
-### DB
+Only the template's Laravel example tests exist. The author added no tests. `phpunit.xml` points at a `testing` database, which Sail's PostgreSQL init script creates.
 
-Banco de dados Postgresql em docker, pronto para ser utilizado no Desafio.
+## Project structure
 
-#### Iniciando:
+```
+api/app/Http/Controllers/   PlanController (hire), ContractController, PaymentController, UserController
+api/app/Models/             Plan, User, Contract, Payment
+api/app/Observers/          PaymentObserver
+api/database/migrations/    plans, users (template); contracts, payments (author)
+api/routes/api.php          API routes
+db/docker-compose.yml       PostgreSQL (template)
+front/                      React scaffold (template, unchanged)
+```
 
-`docker compose up`
+## Notes
 
-### Api:
-
-- Essa api será usada no Desafio Fullstack de troca de plano.
-- Depende de um banco de dados Postgresql.
-- Essa api não tem a parte de login, para simplificar o exercício.
-
-#### Iniciando:
-
-1. Copie o arquivo `.env.example` para `.env` e modifique se necessário
-2. `composer Install`
-3. `php artisan key:generate`
-4. `php artisan migrate`
-5. `php artisan db:seed`
-6. Executar com o comando: `php artisan serve`
-
-### Rotas já criadas:
-
-1. /api/plans - Retorna a lista de planos
-2. /api/user - Retorna o usuário "logado"
-
-## Extras
-
-- Exibir o histórico dos planos assinados pelo usuário, com os seguintes dados: <br/>
-  > descrição do plano  
-  > valor  
-  > desconto  
-  > data de pagamento
-- Utilizar o pré-processador de CSS Tailwind;
-- Estrutura de pastas e organização do código;
-- Utilização e criação de Hooks;
-- Utilizar Typescript corretamente;
-- Seguir os padrões do Laravel sempre que possível, especialmente na criação de: Rotas, Migrations, Models, Controllers;
-- Seguir o padrão REST para as rotas da API;
-- Manter o histórico dos commits e utilizar Conventional Commits Pattern.
+- Only the back end was built. The front-end screens that the statement asks for are not implemented: the plan list, the Pix payment page, the current plan and the history.
+- The credit is based on the old contract's `value` (the plan price), not on what the user actually paid for it.
+- `hire` does not stop the user from hiring their current plan again. Hiring without paying leaves extra inactive contracts with pending payments.
+- The `contracts` and `payments` foreign keys use `onDelete('set null')` on columns that are not nullable.
+- The Makefile's `sh:mysql` target points at a `mysql` service that does not exist in this compose file.
+- `api/artisan` lost its executable bit, so use `php artisan`.
+- `vendor/` and `node_modules/` are not committed.
